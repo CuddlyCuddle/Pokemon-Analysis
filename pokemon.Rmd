@@ -1,0 +1,208 @@
+---
+title: "Pokemon Anlysis"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rvest)
+library(selectr)
+library(xml2)
+library(tidyr)
+library(dplyr)
+library(stringr)
+library(data.table)
+library(ggplot2)
+library(beeswarm)
+library(forcats)
+library(data.table)
+library(DT)
+```
+
+#What is the Best pokemon team by base stats?
+## Webscraping and Data preperation
+```{r}
+url = "https://pokemondb.net/pokedex/all"
+poke_data <- read_html(url) %>%
+  html_element("table") %>%
+  html_table()
+
+url2 = "https://bulbapedia.bulbagarden.net/wiki/User:Focus58/List_of_Legendary_Pok%C3%A9mon"
+legendary <- read_html(url2) %>%
+  html_node("table table") %>%
+  html_table()
+
+url3 = "https://nintendo.fandom.com/wiki/Legendary_Pok%C3%A9mon"
+legendary2 <- read_html(url3) %>%
+  html_nodes(".wikitable") %>%
+  html_table(header = T) %>%
+  sapply(function(x){x$Name}, simplify = TRUE) %>%
+  unlist() %>%
+  append(c("Eternatus", "Kubfu", "Urshifu", "Zarude", "Regieleki", "Regidrago", "Glastrier", "Spectrier", "Calyrex"))
+
+url4 <- "https://www.smogon.com/dex/sm/pokemon/"
+Tier <- read_html(url4) %>%
+  html_node("div .PokemonAltRow-tags")
+
+
+poke_stats <- poke_data %>% 
+  mutate(Name = str_remove(gsub("([[:upper:]])", " \\1", str_remove_all(poke_data$Name, " ")), " "),
+         Type = str_remove(gsub("?([[:upper:]])", " \\1", poke_data$Type), " "),
+         Legendary = `#` %in% str_remove_all(legendary$`#`, "#") | str_detect(Name, paste(legendary2, collapse = "|")),
+         Mega = str_detect(Name, "Mega"),
+         Galarian = str_detect(Name, "Galarian"),
+         Max = str_detect(Name, "max|Max"),
+         Primal = str_detect(Name, "Primal")) %>%
+  separate(Type, into = c("Type1", "Type2"), sep = " ")
+```
+## Analysis of Type Combinations
+```{r}
+# Quantity of pokemon with one vs two types
+poke_stats %>% 
+  mutate(Type = ifelse(is.na(Type2), "Single Typed", "Dual Typed")) %>%
+  ggplot(aes(x = Type, y = stat(count), fill = Type)) +
+  geom_bar() +
+  labs(y = "Count", title = "Number of Single and Dual typed Pokemon")+
+  geom_text(stat='count', aes(label = stat(count)), vjust=1.6, color="white", size=4.25) +
+  theme_minimal()
+
+# Count of all types
+## Dual Types Counted Twice
+poke_stats %>%
+  select(Type1, Type2) %>%
+  gather(key = "Dual", value = "Type") %>%
+  drop_na() %>%
+  count(Type) %>%
+  ggplot(aes(x = fct_reorder(Type, n), y = n, fill = Type)) +
+  geom_col() +
+  labs(x = "Type", y = "Count", title = "Count of all Types", caption = "* Dual Types are counted twice") +
+  theme(legend.position = "none") +
+  coord_flip() +
+  geom_text(aes(label = n), color = "white", hjust = 1.25, vjust = .35)
+  
+
+
+
+poke_stats %>%
+  count(Type1, Type2) %>% 
+  mutate(Type2 = ifelse(is.na(Type2), Type1, Type2)) %>%
+  ggplot(aes(x = Type2, y = Type1, fill = n)) +
+  geom_tile() +
+  labs(x = "Type 2", y = "Type 1", title = "Count of Each type Combination") +
+  geom_text(aes(label = n), color = "white") +
+  theme(axis.text.x = element_text(angle=90, vjust=.5, hjust=1),
+        legend.position = "none")
+```
+
+
+## Analysis of base stats
+```{r}
+#Stats by Type
+poke_stats %>%
+  filter(Mega == FALSE) %>%
+  pivot_longer(c(Type1, Type2), names_to = "Dual", values_to = "Type") %>%
+  pivot_longer(HP:Speed, names_to = "Stat", values_to = "Value") %>%
+  drop_na() %>%
+  ggplot(aes(Stat, Value, fill = Type)) +
+  geom_boxplot()
+
+#Total Stats by Type
+poke_stats %>%
+  filter(Mega == FALSE) %>%
+  pivot_longer(c(Type1, Type2), names_to = "Dual", values_to = "Type") %>%
+  pivot_longer(HP:Speed, names_to = "Stat", values_to = "Value") %>%
+  drop_na() %>%
+  ggplot(aes(Total, Value, fill = Type)) +
+  geom_boxplot()
+poke_stats %>%
+  pivot_longer(c(Type1, Type2), names_to = "Dual", values_to = "Type") %>%
+  pivot_longer(Total:Speed, names_to = "Stat", values_to = "Value") %>%
+  group_by(Type, Stat) %>%
+  drop_na() %>%
+  summarize(median = median(Value)) %>%
+  pivot_wider(names_from = Stat, values_from = median) %>%
+  arrange(desc(Total)) %>%
+  datatable()
+  
+
+#Stats by Legendary
+poke_stats %>%
+  filter(Mega == FALSE) %>%
+  pivot_longer(c(Type1, Type2), names_to = "Dual", values_to = "Type") %>%
+  pivot_longer(HP:Speed, names_to = "Stat", values_to = "Value") %>%
+  drop_na() %>%
+  ggplot(aes(Stat, Value, fill = Legendary)) +
+  geom_boxplot()
+```
+
+
+
+
+## Top 5 pokemon in Each base stat
+```{r}
+Top5 <- poke_stats %>%
+  filter(Mega == FALSE, Primal == FALSE, Max == FALSE, Legendary == FALSE) %>%
+  pivot_longer(HP:Speed, names_to = "Stat", values_to = "Value") %>%
+  group_by(Stat) %>%
+  arrange(desc(Value)) %>%
+  top_n(10) %>%
+  pivot_wider(names_from = Stat, values_from = Value)
+
+
+```
+
+
+## Determining Most Advantagious Stats
+```{r}
+## Scaling Base Pokemon Stats
+#Scaling Stats
+poke_stats_scaled <- poke_data %>%
+  select(-c("Type")) %>%
+  mutate(`#` = as.factor(`#`)) %>%
+  mutate_if(is.numeric, scale) %>%
+  mutate(`#` = as.numeric(`#`))
+
+#Left Join
+scaled_stats <- poke_stats %>%
+  mutate(ID = poke_data$Name) %>%
+  left_join(poke_stats_scaled, by = c("ID" = "Name"), suffix = c("",".scaled")) %>%
+  rowwise() %>%
+  mutate(Total.scaled = sum(c_across(HP.scaled:Speed.scaled))) %>%
+  select(-c(`#.scaled`,ID))
+
+```
+
+
+
+## Ordering The Best Stats
+```{r}
+
+
+```
+
+
+## Determining Best Pokemon Types
+```{r}
+
+
+```
+
+
+## Determining Best Pokemon Type Combinations
+```{r}
+
+```
+
+
+## Best Pokemon by Type and Stats
+```{r}
+
+
+```
+
+## Best Pokemon Teams
+```{r}
+
+
+```
+
